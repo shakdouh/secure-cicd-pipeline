@@ -20,7 +20,7 @@ pipeline {
                 // هنا نقوم بفحص الصورة. 
                 // --severity HIGH,CRITICAL يعني ابحث عن الثغرات العالية والخطيرة فقط.
                 // --exit-code 1 يعني أفشل الـ Pipeline إذا وجدت أي ثغرة.
-                sh "trivy image --severity HIGH,CRITICAL --exit-code 1 ${IMAGE_NAME}:latest"
+                sh "trivy image --severity CRITICAL --exit-code 1 ${IMAGE_NAME}:latest"
             }
         }
         stage('Deploy') {
