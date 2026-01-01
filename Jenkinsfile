@@ -1,35 +1,43 @@
 pipeline {
     agent any
+    
     environment {
         IMAGE_NAME = "my-secure-app"
+        CONTAINER_NAME = "secure-app-container"
     }
+
     stages {
         stage('Checkout') {
             steps {
+                // سحب الكود من GitHub
                 checkout scm
             }
         }
+
         stage('Build Image') {
             steps {
+                // بناء صورة الدوكر
                 sh "docker build -t ${IMAGE_NAME}:latest ."
             }
         }
+
         stage('Security Scan (Trivy)') {
             steps {
                 script {
-                    echo "Generating Security Report..."
-                    
-                    // 1. توليد تقرير HTML (لن يفشل الـ build هنا مهما كانت الثغرات)
-                    // قمنا بتحميل ملف التنسيق html.tpl ليكون التقرير أنيقاً
+                    echo "Running Vulnerability Scan & Generating Report..."
+
+                    // 1. توليد تقرير HTML (للعرض المرئي داخل جينكينز)
+                    // نستخدم القالب الافتراضي المتوفر في Trivy
                     sh "trivy image --format template --template '@/usr/local/share/trivy/templates/html.tpl' -o report.html ${IMAGE_NAME}:latest"
-                    
-                    // 2. الفحص الفعلي الذي يحدد نجاح أو فشل الـ Build (فقط للـ CRITICAL)
+
+                    // 2. الفحص الأمني الفعلي (Gate)
+                    // سيفشل الـ Build فقط إذا وُجدت ثغرات من نوع CRITICAL
                     sh "trivy image --severity CRITICAL --exit-code 1 ${IMAGE_NAME}:latest"
                 }
             }
             post {
                 always {
-                    // نشر التقرير ليظهر في واجهة جينكينز
+                    // نشر التقرير ليظهر في القائمة اليسرى للجوب في جينكينز
                     publishHTML([
                         allowMissing: false,
                         alwaysLinkToLastBuild: true,
@@ -43,23 +51,38 @@ pipeline {
             }
         }
 
-//        stage('Security Scan (Trivy)') {
-//            steps {
-//                echo "Running Vulnerability Scan..."
-                // هنا نقوم بفحص الصورة. 
-                // --severity HIGH,CRITICAL يعني ابحث عن الثغرات العالية والخطيرة فقط.
-                // --exit-code 1 يعني أفشل الـ Pipeline إذا وجدت أي ثغرة.
-//                sh "trivy image --severity CRITICAL --exit-code 1 ${IMAGE_NAME}:latest"
-//            }
-//        }
         stage('Deploy') {
             steps {
-                // لن يصل جينكينز لهذه المرحلة إذا فشل الفحص الأمني أعلاه
+                // هذه المرحلة لن تعمل إلا إذا نجح الفحص الأمني (صفر ثغرات Critical)
                 sh """
-                    docker rm -f secure-app-container || true
-                    docker run -d --name secure-app-container -p 3000:3000 ${IMAGE_NAME}:latest
+                    docker rm -f ${CONTAINER_NAME} || true
+                    docker run -d --name ${CONTAINER_NAME} -p 3000:3000 ${IMAGE_NAME}:latest
                 """
+                echo "Application deployed successfully on port 3000."
             }
+        }
+    }
+
+    post {
+        failure {
+            // يتم إرسال هذا الإيميل فقط في حالة فشل الـ Pipeline (مثلاً عند وجود ثغرات)
+            mail to: 'he.oss.2023@gmail.com',
+                 subject: "⚠️ Security Alert: Pipeline Failed - ${env.JOB_NAME} [Build #${env.BUILD_NUMBER}]",
+                 body: """⚠️ Security Vulnerabilities Detected!
+                 
+The CI/CD pipeline for ${env.JOB_NAME} has failed during the Security Scan stage.
+A critical vulnerability was found that prevents deployment to ensure production safety.
+
+Please check the detailed Trivy Security Report here: ${env.BUILD_URL}Trivy_20Security_20Report/
+
+Build Details:
+- Project: ${env.JOB_NAME}
+- Build Number: ${env.BUILD_NUMBER}
+- Status: FAILURE (Security Gate)"""
+        }
+        
+        success {
+            echo "Congratulations! The pipeline completed successfully and the image is secure."
         }
     }
 }
